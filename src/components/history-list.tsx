@@ -1,15 +1,18 @@
 'use client'
 
-import { Plus, Search, X } from 'lucide-react'
+import { CalendarRange, Plus, Search, X } from 'lucide-react'
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
+import { DayFilter } from '@/components/day-filter'
 import { EmptyState } from '@/components/empty-state'
 import { ExpenseRow } from '@/components/expense-row'
 import { MonthSwitcher } from '@/components/month-switcher'
 import { SourceTabs } from '@/components/source-tabs'
 import { EXPENSE_SOURCES, EXPENSE_SOURCE_KEYS, PAYMENT_METHODS } from '@/lib/constants'
-import { formatDayHeading, formatMonthName } from '@/lib/dates'
+import type { DayRange } from '@/lib/dates'
+import { addDays, formatDayHeading, formatFullDate, formatMonthName } from '@/lib/dates'
 import { formatMoney, normalizeText } from '@/lib/format'
+import { historyHref } from '@/lib/history-url'
 import { buttonClass, card, inputBase } from '@/lib/styles'
 import type { Category, Expense, ExpenseSource } from '@/lib/types'
 import { cx, plural } from '@/lib/utils'
@@ -20,6 +23,8 @@ type HistoryListProps = {
   month: string
   currentMonth: string
   today: string
+  /** Días que se están viendo. null = el mes completo. */
+  range: DayRange | null
   initialCategoryId: string | null
   initialSource: ExpenseSource | null
   truncated: boolean
@@ -31,6 +36,7 @@ export function HistoryList({
   month,
   currentMonth,
   today,
+  range,
   initialCategoryId,
   initialSource,
   truncated,
@@ -85,6 +91,8 @@ export function HistoryList({
   const totalFor = (key: ExpenseSource) =>
     filtered.reduce((sum, item) => (item.source === key ? sum + item.amount : sum), 0)
   const selectedCategory = categoryId ? categoryById.get(categoryId) : undefined
+  /** Filtros que se conservan al cambiar de mes o de días. */
+  const navParams = { categoria: categoryId ?? undefined, origen: source ? EXPENSE_SOURCES[source].slug : undefined }
 
   function syncUrl(key: string, value: string | null) {
     const params = new URLSearchParams(window.location.search)
@@ -117,12 +125,12 @@ export function HistoryList({
         <p className="text-sm text-stone-500">Toca un gasto para editarlo o eliminarlo.</p>
       </header>
 
-      <MonthSwitcher
-        month={month}
-        currentMonth={currentMonth}
-        basePath="/historial"
-        params={{ categoria: categoryId ?? undefined, origen: source ? EXPENSE_SOURCES[source].slug : undefined }}
-      />
+      {/* Con un tramo de días elegido manda el tramo, que puede cruzar meses. */}
+      {range === null && (
+        <MonthSwitcher month={month} currentMonth={currentMonth} basePath="/historial" params={navParams} />
+      )}
+
+      <DayFilter month={month} currentMonth={currentMonth} today={today} range={range} params={navParams} />
 
       {expenses.length > 0 && (
         <>
@@ -162,10 +170,21 @@ export function HistoryList({
       {expenses.length === 0 ? (
         <EmptyState
           emoji="🗓️"
-          title={`No hay gastos en ${formatMonthName(month)}`}
-          description={month === currentMonth ? 'Cuando registres un gasto aparecerá aquí.' : 'Prueba con otro mes.'}
+          title={emptyTitle(range, month, today)}
+          description={
+            range
+              ? 'Prueba con otros días o vuelve al mes completo.'
+              : month === currentMonth
+                ? 'Cuando registres un gasto aparecerá aquí.'
+                : 'Prueba con otro mes.'
+          }
           action={
-            month === currentMonth ? (
+            range ? (
+              <Link href={historyHref({ month, currentMonth, params: navParams })} className={buttonClass('secondary')}>
+                <CalendarRange className="size-5" />
+                Ver todo el mes
+              </Link>
+            ) : month === currentMonth ? (
               <Link href="/agregar" className={buttonClass()}>
                 <Plus className="size-5" />
                 Registrar gasto
@@ -222,12 +241,23 @@ export function HistoryList({
           ))}
 
           {truncated && (
-            <p className="text-center text-xs text-stone-500">Se muestran los primeros 1.000 gastos del mes.</p>
+            <p className="text-center text-xs text-stone-500">
+              Se muestran los primeros 1.000 gastos {range ? 'de estos días' : 'del mes'}.
+            </p>
           )}
         </>
       )}
     </div>
   )
+}
+
+/** "No hay gastos en octubre", "No hay gastos hoy", "No hay gastos en esos días"… */
+function emptyTitle(range: DayRange | null, month: string, today: string): string {
+  if (!range) return `No hay gastos en ${formatMonthName(month)}`
+  if (range.from !== range.through) return 'No hay gastos en esos días'
+  if (range.from === today) return 'No hay gastos hoy'
+  if (range.from === addDays(today, -1)) return 'No hay gastos ayer'
+  return `No hay gastos el ${formatFullDate(range.from)}`
 }
 
 function FilterChip({

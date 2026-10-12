@@ -8,9 +8,9 @@ App web para registrar y controlar los gastos del restaurante desde el celular o
 - **Gastos fijos:** arriendo, servicios, nómina… Se definen una vez y cada mes el inicio muestra cuáles faltan por registrar, con los datos ya llenos.
 - **Resumen del mes** por categoría, comparado con los mismos días del mes anterior.
 - **Presupuesto mensual** por categoría, con aviso cuando te pasas.
-- **Historial** con búsqueda por proveedor, nota o monto; editar y eliminar gastos.
+- **Historial** por mes o por días (hoy, ayer, los últimos días o un tramo exacto), con búsqueda por proveedor, nota o monto; editar y eliminar gastos.
 - **Proveedores** que recuerdan su categoría habitual y la eligen solos.
-- **Exportar** un mes a CSV para Excel o Google Sheets.
+- **Exportar** un mes a Excel (.xlsx) con tres hojas: el detalle, el resumen por categoría y el total de cada día.
 - **Se instala en el celular** como una app (PWA).
 
 **Tecnología:** Next.js 16 · Supabase (base de datos y login) · Tailwind CSS · Vercel.
@@ -89,7 +89,7 @@ src/lib/                  Consultas, formato de dinero y fechas, configuración
 src/components/           Formulario de gasto, historial, resumen, categorías, proveedores
 src/app/(app)/            Páginas con menú inferior: inicio, historial, categorías, ajustes
 src/app/(form)/           Pantallas de registrar y editar un gasto
-src/app/api/exportar/     Descarga CSV
+src/app/api/exportar/     Descarga el Excel del mes (se arma en src/lib/excel.ts)
 ```
 
 ## Scripts

@@ -1,17 +1,16 @@
 import type { NextRequest } from 'next/server'
-import { CURRENCY_DECIMALS } from '@/lib/config'
-import { EXPENSE_SOURCES, PAYMENT_METHODS, sourceFromSlug } from '@/lib/constants'
+import { EXPENSE_SOURCES, sourceFromSlug } from '@/lib/constants'
 import { getAllExpenses, getCategories } from '@/lib/data'
-import { isValidMonth, monthRange } from '@/lib/dates'
-import { DECIMAL_SEPARATOR } from '@/lib/format'
+import { formatMonth, isValidMonth, monthRange, todayISO } from '@/lib/dates'
+import { buildExpensesWorkbook } from '@/lib/excel'
 import { createClient } from '@/lib/supabase/server'
 import type { Category, Expense } from '@/lib/types'
 
-/** Marca de UTF-8 (BOM) para que Excel muestre bien las tildes. */
-const UTF8_BOM = String.fromCharCode(0xfeff)
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 /**
- * Descarga los gastos de un mes como CSV separado por ";" (así lo abre Excel en español).
+ * Descarga los gastos de un mes en un archivo de Excel (.xlsx) con tres hojas:
+ * el detalle, el resumen por categoría y el total de cada día.
  * ?mes=2026-09 y, opcional, ?origen=caja-menor | jefe.
  */
 export async function GET(request: NextRequest) {
@@ -36,39 +35,20 @@ export async function GET(request: NextRequest) {
   }
   const [categories, expenses] = loaded
 
-  const categoryName = new Map(categories.map((category) => [category.id, category.name]))
-  const formatAmount = (value: number) => value.toFixed(CURRENCY_DECIMALS).replace('.', DECIMAL_SEPARATOR)
-  const total = expenses.reduce((sum, expense) => sum + expense.amount, 0)
+  const workbook = await buildExpensesWorkbook({
+    expenses,
+    categories,
+    periodLabel: formatMonth(month),
+    source,
+    generatedOn: todayISO(),
+  })
+  const fileName = `gastos-${month}${source ? `-${EXPENSE_SOURCES[source].slug}` : ''}.xlsx`
 
-  const rows = [
-    ['Fecha', 'Origen', 'Categoría', 'Proveedor', 'Descripción', 'Método de pago', 'Foto de factura', 'Monto'],
-    ...expenses.map((expense) => [
-      expense.spent_on,
-      EXPENSE_SOURCES[expense.source].label,
-      categoryName.get(expense.category_id) ?? '',
-      expense.supplier_name ?? '',
-      expense.description ?? '',
-      PAYMENT_METHODS[expense.payment_method].label,
-      expense.receipt_path ? 'Sí' : 'No',
-      formatAmount(expense.amount),
-    ]),
-    ['', '', '', '', '', '', 'Total', formatAmount(total)],
-  ]
-
-  const csv = rows.map((cells) => cells.map(toCsvCell).join(';')).join('\r\n')
-  const fileName = `gastos-${month}${source ? `-${EXPENSE_SOURCES[source].slug}` : ''}.csv`
-
-  return new Response(UTF8_BOM + csv, {
+  return new Response(workbook, {
     headers: {
-      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Type': XLSX_TYPE,
       'Content-Disposition': `attachment; filename="${fileName}"`,
       'Cache-Control': 'no-store',
     },
   })
-}
-
-function toCsvCell(value: string): string {
-  // Evita que Excel interprete textos como fórmulas.
-  const safe = /^[=+\-@]/.test(value) ? `'${value}` : value
-  return /[";\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe
 }

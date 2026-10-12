@@ -15,7 +15,8 @@ export function todayISO(): string {
   return isoFormatter.format(new Date())
 }
 
-function toUTCDate(iso: string): Date {
+/** Una fecha "YYYY-MM-DD" como Date (medianoche UTC), para lo que necesite objetos Date. */
+export function toUTCDate(iso: string): Date {
   const [year, month, day] = iso.split('-').map(Number)
   return new Date(Date.UTC(year, month - 1, day))
 }
@@ -67,6 +68,20 @@ const shortDayWithYearFormatter = new Intl.DateTimeFormat(LOCALE, {
   year: 'numeric',
   timeZone: 'UTC',
 })
+const fullDateFormatter = new Intl.DateTimeFormat(LOCALE, {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
+const weekdayFormatter = new Intl.DateTimeFormat(LOCALE, { weekday: 'long', timeZone: 'UTC' })
+const dayMonthFormatter = new Intl.DateTimeFormat(LOCALE, { day: 'numeric', month: 'long', timeZone: 'UTC' })
+const numericDateFormatter = new Intl.DateTimeFormat(LOCALE, {
+  day: 'numeric',
+  month: 'numeric',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
 
 /** "Septiembre de 2026" */
 export function formatMonth(month: string): string {
@@ -90,10 +105,61 @@ export function formatDayHeading(iso: string, today: string): string {
   return formatLongDate(iso)
 }
 
+/** "12 de octubre de 2026" */
+export function formatFullDate(iso: string): string {
+  return fullDateFormatter.format(toUTCDate(iso))
+}
+
+/** "Lunes" */
+export function formatWeekday(iso: string): string {
+  return capitalize(weekdayFormatter.format(toUTCDate(iso)))
+}
+
 /** "Hoy", "Ayer" o "9 sept" */
 export function formatShortDay(iso: string, today: string): string {
   if (iso === today) return 'Hoy'
   if (iso === addDays(today, -1)) return 'Ayer'
   const formatter = iso.slice(0, 4) === today.slice(0, 4) ? shortDayFormatter : shortDayWithYearFormatter
   return formatter.format(toUTCDate(iso))
+}
+
+/** Tramo de días elegido en el historial. Incluye el primero y el último. */
+export type DayRange = { from: string; through: string }
+
+/**
+ * Lee ?desde=&hasta= del historial: acepta un solo día, ordena los extremos si
+ * vienen al revés y no deja pedir días que todavía no llegan.
+ */
+export function normalizeDayRange(from: unknown, through: unknown, today: string): DayRange | null {
+  const start = isValidISODate(from) ? from : null
+  const end = isValidISODate(through) ? through : null
+  const first = start ?? end
+  const second = end ?? start
+  if (!first || !second) return null
+  const [earlier, later] = first <= second ? [first, second] : [second, first]
+  const clamp = (day: string) => (day > today ? today : day)
+  return { from: clamp(earlier), through: clamp(later) }
+}
+
+/** Rango [from, to) que cubre todos los días del tramo. */
+export function dayRangeBounds({ from, through }: DayRange): { from: string; to: string } {
+  return { from, to: addDays(through, 1) }
+}
+
+/** "Hoy", "Ayer", "1–7 de octubre" o "28 sept – 4 oct" */
+export function formatDayRange({ from, through }: DayRange, today: string): string {
+  if (from === through) return formatDayHeading(from, today)
+  // El texto se arma a mano porque Intl.formatRange separa el rango con caracteres
+  // distintos según la versión de ICU: el servidor y el navegador escribirían textos
+  // diferentes y React tendría que rehacer esa parte de la página (error de hidratación).
+  const year = today.slice(0, 4)
+  const sameYear = from.slice(0, 4) === year && through.slice(0, 4) === year
+  // Dentro del mismo mes se escribe completo ("1–12 de octubre"); si cruza meses se
+  // abrevia para que quepa en la pantalla del celular sin cortarse.
+  if (from.slice(0, 7) === through.slice(0, 7)) {
+    const formatter = sameYear ? dayMonthFormatter : fullDateFormatter
+    return `${Number(from.slice(8, 10))}–${formatter.format(toUTCDate(through))}`
+  }
+  const formatter = sameYear ? shortDayFormatter : numericDateFormatter
+  return `${formatter.format(toUTCDate(from))} – ${formatter.format(toUTCDate(through))}`
 }

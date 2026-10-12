@@ -50,7 +50,8 @@ export default async function SettingsPage() {
         <h2 className={sectionTitle}>Exportar</h2>
         <form action="/api/exportar" method="get" className={cx(card, 'space-y-4 p-5')}>
           <p className="text-sm text-stone-600">
-            Descarga los gastos de un mes en un archivo que abre Excel o Google Sheets. Útil para tu contador.
+            Descarga los gastos de un mes en un archivo de Excel con tres hojas: el detalle, el resumen por categoría y
+            el total de cada día. Útil para tu contador.
           </p>
           <div>
             <label htmlFor="export-month" className={fieldLabel}>
@@ -79,7 +80,7 @@ export default async function SettingsPage() {
           </div>
           <button type="submit" className={cx(buttonClass('secondary'), 'w-full')}>
             <Download className="size-5" />
-            Descargar archivo
+            Descargar Excel
           </button>
         </form>
       </section>
