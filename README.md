@@ -5,6 +5,7 @@ App web para registrar y controlar los gastos del restaurante desde el celular o
 - **Registro rápido:** monto + categoría y listo. Proveedor, fecha, forma de pago y nota son opcionales.
 - **Caja menor y jefe:** cada gasto indica si lo pagó el cajero (🪙 caja menor) o el jefe (👔). El inicio, el historial y la exportación los muestran juntos o por separado.
 - **Foto de la factura:** se toma al registrar el gasto y queda guardada como soporte, en un almacenamiento privado que solo ve su dueño.
+- **Varios gastos de un día:** cuando te pasan una lista, eliges el día una sola vez, agregas los gastos sin esperas y los guardas todos juntos. Los proveedores y categorías que más usas quedan a un toque, y la lista no se pierde si cierras la app.
 - **Gastos fijos:** arriendo, servicios, nómina… Se definen una vez y cada mes el inicio muestra cuáles faltan por registrar, con los datos ya llenos.
 - **Resumen del mes** por categoría, comparado con los mismos días del mes anterior.
 - **Presupuesto mensual** por categoría, con aviso cuando te pasas.
@@ -88,7 +89,7 @@ src/actions/              Acciones del servidor: guardar, editar, eliminar
 src/lib/                  Consultas, formato de dinero y fechas, configuración
 src/components/           Formulario de gasto, historial, resumen, categorías, proveedores
 src/app/(app)/            Páginas con menú inferior: inicio, historial, categorías, ajustes
-src/app/(form)/           Pantallas de registrar y editar un gasto
+src/app/(form)/           Pantallas de registrar (uno o varios) y editar gastos
 src/app/api/exportar/     Descarga el Excel del mes (se arma en src/lib/excel.ts)
 ```
 

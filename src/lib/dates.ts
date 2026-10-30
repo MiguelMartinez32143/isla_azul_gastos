@@ -110,6 +110,11 @@ export function formatFullDate(iso: string): string {
   return fullDateFormatter.format(toUTCDate(iso))
 }
 
+/** "12 de octubre" */
+export function formatDayMonth(iso: string): string {
+  return dayMonthFormatter.format(toUTCDate(iso))
+}
+
 /** "Lunes" */
 export function formatWeekday(iso: string): string {
   return capitalize(weekdayFormatter.format(toUTCDate(iso)))
@@ -122,6 +127,9 @@ export function formatShortDay(iso: string, today: string): string {
   const formatter = iso.slice(0, 4) === today.slice(0, 4) ? shortDayFormatter : shortDayWithYearFormatter
   return formatter.format(toUTCDate(iso))
 }
+
+/** Hasta cuántos días atrás (contando hoy) "Varios gastos" muestra lo ya registrado. */
+export const DAYS_WITH_TOTALS = 31
 
 /** Tramo de días elegido en el historial. Incluye el primero y el último. */
 export type DayRange = { from: string; through: string }

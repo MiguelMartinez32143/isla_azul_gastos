@@ -15,7 +15,7 @@ import { formatMoney, normalizeText } from '@/lib/format'
 import { historyHref } from '@/lib/history-url'
 import { buttonClass, card, inputBase } from '@/lib/styles'
 import type { Category, Expense, ExpenseSource } from '@/lib/types'
-import { cx, plural } from '@/lib/utils'
+import { buildHref, cx, plural } from '@/lib/utils'
 
 type HistoryListProps = {
   expenses: Expense[]
@@ -180,10 +180,18 @@ export function HistoryList({
           }
           action={
             range ? (
-              <Link href={historyHref({ month, currentMonth, params: navParams })} className={buttonClass('secondary')}>
-                <CalendarRange className="size-5" />
-                Ver todo el mes
-              </Link>
+              <div className="grid gap-2">
+                {range.from === range.through && (
+                  <Link href={buildHref('/agregar/varios', { fecha: range.from })} className={buttonClass()}>
+                    <Plus className="size-5" />
+                    Registrar gastos de ese día
+                  </Link>
+                )}
+                <Link href={historyHref({ month, currentMonth, params: navParams })} className={buttonClass('secondary')}>
+                  <CalendarRange className="size-5" />
+                  Ver todo el mes
+                </Link>
+              </div>
             ) : month === currentMonth ? (
               <Link href="/agregar" className={buttonClass()}>
                 <Plus className="size-5" />
@@ -228,7 +236,16 @@ export function HistoryList({
             <section key={day} className={cx(card, 'overflow-hidden')}>
               <div className="flex items-center justify-between border-b border-stone-100 bg-stone-50 px-5 py-2 text-sm">
                 <h2 className="font-semibold text-stone-700">{formatDayHeading(day, today)}</h2>
-                <span className="tabular-nums text-stone-500">{formatMoney(dayTotal)}</span>
+                <span className="flex items-center gap-1.5">
+                  <span className="tabular-nums text-stone-500">{formatMoney(dayTotal)}</span>
+                  <Link
+                    href={buildHref('/agregar/varios', { fecha: day })}
+                    aria-label={`Agregar gastos a: ${formatDayHeading(day, today)}`}
+                    className="-my-1.5 -mr-2 grid size-8 place-items-center rounded-full text-brand-700 transition hover:bg-stone-200"
+                  >
+                    <Plus className="size-4" />
+                  </Link>
+                </span>
               </div>
               <ul className="divide-y divide-stone-100">
                 {items.map((item) => (

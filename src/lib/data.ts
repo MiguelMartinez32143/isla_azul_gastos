@@ -193,23 +193,42 @@ export async function getRegisteredRecurringIds(
   return new Set((data as unknown as { recurring_id: string }[]).map((row) => row.recurring_id))
 }
 
+/** Lo que más se repite: un proveedor o, en los gastos sin proveedor, una categoría. */
+export type QuickPick = { supplierId: string | null; categoryId: string }
+
+const MAX_QUICK_PICKS = 10
+
 export type RecentUsage = {
   supplierIds: string[]
   lastSource: ExpenseSource
   paymentBySource: Record<ExpenseSource, PaymentMethod>
+  quickPicks: QuickPick[]
 }
 
 /** Lo usado recientemente (proveedores, origen y forma de pago) para sugerirlo al registrar. */
 export async function getRecentUsage(supabase: SupabaseServerClient): Promise<RecentUsage> {
   const { data, error } = await supabase
     .from('expenses')
-    .select('supplier_id, payment_method, source')
+    .select('supplier_id, category_id, payment_method, source')
     .order('created_at', { ascending: false })
     .limit(300)
   if (error) throw new Error(`No se pudo cargar el uso reciente: ${error.message}`)
 
-  const rows = data as unknown as { supplier_id: string | null; payment_method: PaymentMethod; source: ExpenseSource }[]
+  const rows = data as unknown as {
+    supplier_id: string | null
+    category_id: string
+    payment_method: PaymentMethod
+    source: ExpenseSource
+  }[]
   const lastPaymentFor = (source: ExpenseSource) => rows.find((row) => row.source === source)?.payment_method
+
+  const uses = new Map<string, QuickPick & { count: number }>()
+  for (const row of rows) {
+    const key = row.supplier_id ?? row.category_id
+    const pick = uses.get(key)
+    if (pick) pick.count += 1
+    else uses.set(key, { supplierId: row.supplier_id, categoryId: row.category_id, count: 1 })
+  }
 
   return {
     supplierIds: [...new Set(rows.flatMap((row) => (row.supplier_id ? [row.supplier_id] : [])))],
@@ -218,7 +237,35 @@ export async function getRecentUsage(supabase: SupabaseServerClient): Promise<Re
       petty_cash: lastPaymentFor('petty_cash') ?? 'cash',
       manager: lastPaymentFor('manager') ?? 'transfer',
     },
+    quickPicks: [...uses.values()]
+      .sort((a, b) => b.count - a.count)
+      .slice(0, MAX_QUICK_PICKS)
+      .map(({ supplierId, categoryId }) => ({ supplierId, categoryId })),
   }
+}
+
+export type DayTotals = Record<string, { count: number; total: number }>
+
+/** Cuántos gastos hay registrados en cada día del rango [from, to). */
+export async function getDayTotals(
+  supabase: SupabaseServerClient,
+  { from, to }: { from: string; to: string },
+): Promise<DayTotals> {
+  const { data, error } = await supabase
+    .from('expenses')
+    .select('spent_on, amount')
+    .gte('spent_on', from)
+    .lt('spent_on', to)
+    .limit(PAGE_SIZE)
+  if (error) throw new Error(`No se pudieron cargar los totales por día: ${error.message}`)
+
+  const totals: DayTotals = {}
+  for (const row of data as unknown as { spent_on: string; amount: number | string }[]) {
+    const day = (totals[row.spent_on] ??= { count: 0, total: 0 })
+    day.count += 1
+    day.total += Number(row.amount)
+  }
+  return totals
 }
 
 export function sortByRecentUse(suppliers: Supplier[], recentIds: string[]): Supplier[] {

@@ -2,10 +2,10 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireUser } from '@/lib/auth'
-import { isExpenseSource, isPaymentMethod } from '@/lib/constants'
+import { MAX_BATCH_ITEMS, isExpenseSource, isPaymentMethod } from '@/lib/constants'
 import { findSupplierIdByName } from '@/lib/data'
 import { isValidISODate } from '@/lib/dates'
-import { MAX_INTEGER_DIGITS, roundAmount } from '@/lib/format'
+import { MAX_INTEGER_DIGITS, normalizeText, roundAmount } from '@/lib/format'
 import { MAX_RECEIPT_BYTES, RECEIPTS_BUCKET, RECEIPT_EXTENSIONS, isOwnReceiptPath } from '@/lib/receipts'
 import type { SupabaseServerClient } from '@/lib/supabase/server'
 import type { ActionResult, ExpenseSource, PaymentMethod } from '@/lib/types'
@@ -28,18 +28,39 @@ export type ExpenseInput = {
   recurringId: string | null
 }
 
+export type BatchExpenseInput = Pick<
+  ExpenseInput,
+  'amount' | 'categoryId' | 'paymentMethod' | 'source' | 'description' | 'supplierId' | 'newSupplierName'
+> & {
+  /** Generado en el dispositivo: al reintentar, lo que ya se guardó no se duplica. */
+  id: string
+}
+
+type CommonExpenseFields = Pick<ExpenseInput, 'amount' | 'categoryId' | 'paymentMethod' | 'source' | 'supplierId'>
+
+/** Lo que se revisa igual en un gasto suelto y en uno de una lista. Devuelve el problema, si hay. */
+function findExpenseProblem(input: CommonExpenseFields): string | null {
+  const amount = roundAmount(Number(input.amount))
+  if (!Number.isFinite(amount) || amount <= 0) return 'Escribe un monto mayor a cero.'
+  if (amount >= 10 ** MAX_INTEGER_DIGITS) return 'El monto es demasiado grande.'
+  if (!isUUID(input.categoryId)) return 'Elige una categoría.'
+  if (!isPaymentMethod(input.paymentMethod)) return 'Elige cómo pagaste.'
+  if (!isExpenseSource(input.source)) return 'Elige si el gasto es de caja menor o del jefe.'
+  if (input.supplierId !== null && !isUUID(input.supplierId)) return 'El proveedor no es válido.'
+  return null
+}
+
+const cleanSupplierName = (name: unknown) => (typeof name === 'string' ? name.trim().slice(0, 80) : '')
+const cleanDescription = (text: unknown) => (typeof text === 'string' ? text.trim().slice(0, 200) || null : null)
+
 export async function saveExpense(input: ExpenseInput): Promise<ActionResult<{ id: string }>> {
   const { supabase, userId } = await requireUser()
 
+  const problem = findExpenseProblem(input)
+  if (problem) return fail(problem)
   const amount = roundAmount(Number(input.amount))
-  if (!Number.isFinite(amount) || amount <= 0) return fail('Escribe un monto mayor a cero.')
-  if (amount >= 10 ** MAX_INTEGER_DIGITS) return fail('El monto es demasiado grande.')
-  if (!isUUID(input.categoryId)) return fail('Elige una categoría.')
   if (!isValidISODate(input.spentOn)) return fail('La fecha no es válida.')
-  if (!isPaymentMethod(input.paymentMethod)) return fail('Elige cómo pagaste.')
-  if (!isExpenseSource(input.source)) return fail('Elige si el gasto es de caja menor o del jefe.')
   if (input.id !== undefined && !isUUID(input.id)) return fail('No encontramos ese gasto.')
-  if (input.supplierId !== null && !isUUID(input.supplierId)) return fail('El proveedor no es válido.')
   if (input.receiptPath !== null && !isOwnReceiptPath(input.receiptPath, userId)) {
     return fail('La foto de la factura no es válida.')
   }
@@ -59,7 +80,7 @@ export async function saveExpense(input: ExpenseInput): Promise<ActionResult<{ i
   }
 
   let supplierId = input.supplierId
-  const newSupplierName = typeof input.newSupplierName === 'string' ? input.newSupplierName.trim().slice(0, 80) : ''
+  const newSupplierName = cleanSupplierName(input.newSupplierName)
   if (!supplierId && newSupplierName) {
     const supplier = await findOrCreateSupplier(supabase, newSupplierName, input.categoryId)
     if (!supplier.ok) return supplier
@@ -72,7 +93,7 @@ export async function saveExpense(input: ExpenseInput): Promise<ActionResult<{ i
     spent_on: input.spentOn,
     payment_method: input.paymentMethod,
     source: input.source,
-    description: typeof input.description === 'string' ? input.description.trim().slice(0, 200) || null : null,
+    description: cleanDescription(input.description),
     supplier_id: supplierId,
     receipt_path: input.receiptPath,
     recurring_id: input.recurringId,
@@ -103,6 +124,70 @@ export async function saveExpense(input: ExpenseInput): Promise<ActionResult<{ i
 
   revalidatePath('/', 'layout')
   return success({ id: (data as { id: string }).id })
+}
+
+/** Guarda de una vez todos los gastos de una lista, con el mismo día. O entran todos o ninguno. */
+export async function saveExpenseBatch(spentOn: string, items: BatchExpenseInput[]): Promise<ActionResult> {
+  const { supabase } = await requireUser()
+
+  if (!isValidISODate(spentOn)) return fail('La fecha no es válida.')
+  if (!Array.isArray(items) || items.length === 0) return fail('Agrega al menos un gasto a la lista.')
+  if (items.length > MAX_BATCH_ITEMS) return fail(`Puedes guardar hasta ${MAX_BATCH_ITEMS} gastos a la vez.`)
+  for (const [index, item] of items.entries()) {
+    const problem = isUUID(item.id) ? findExpenseProblem(item) : 'El gasto no es válido.'
+    if (problem) return fail(`Gasto ${index + 1} de la lista: ${problem}`)
+  }
+
+  // Un proveedor nuevo puede repetirse en la lista, pero se crea una sola vez.
+  const newSupplierIds = new Map<string, string>()
+  for (const item of items) {
+    const name = cleanSupplierName(item.newSupplierName)
+    if (item.supplierId || !name || newSupplierIds.has(normalizeText(name))) continue
+    const supplier = await findOrCreateSupplier(supabase, name, item.categoryId)
+    if (!supplier.ok) return supplier
+    newSupplierIds.set(normalizeText(name), supplier.data.id)
+  }
+
+  const startedAt = Date.now()
+  const rows = items.map((item, index) => ({
+    id: item.id,
+    amount: roundAmount(Number(item.amount)),
+    category_id: item.categoryId,
+    spent_on: spentOn,
+    payment_method: item.paymentMethod,
+    source: item.source,
+    description: cleanDescription(item.description),
+    supplier_id: item.supplierId ?? newSupplierIds.get(normalizeText(cleanSupplierName(item.newSupplierName))) ?? null,
+    // Cada gasto lleva su propia hora para que el historial y el Excel respeten el orden de la lista.
+    created_at: new Date(startedAt + index).toISOString(),
+  }))
+
+  // Si un intento anterior sí alcanzó a guardar pero la respuesta se perdió, no se duplica:
+  // esos gastos quedan con lo que dice la lista ahora, por si se corrigió algo antes de reintentar.
+  const { error } = await supabase.from('expenses').upsert(rows, { onConflict: 'id' })
+  if (error) {
+    if (error.code === '23503') return fail('Una categoría o un proveedor de la lista ya no existe. Corrige ese gasto.')
+    return fail('No se pudieron guardar los gastos. Tu lista sigue aquí: intenta de nuevo.')
+  }
+
+  // Los proveedores sin categoría habitual recuerdan la que se usó para sugerirla la próxima vez.
+  const categoryBySupplier = new Map<string, string>()
+  for (const row of rows) if (row.supplier_id) categoryBySupplier.set(row.supplier_id, row.category_id)
+  if (categoryBySupplier.size > 0) {
+    const { data } = await supabase
+      .from('suppliers')
+      .select('id')
+      .in('id', [...categoryBySupplier.keys()])
+      .is('default_category_id', null)
+    await Promise.all(
+      ((data ?? []) as { id: string }[]).map(({ id }) =>
+        supabase.from('suppliers').update({ default_category_id: categoryBySupplier.get(id) }).eq('id', id),
+      ),
+    )
+  }
+
+  revalidatePath('/', 'layout')
+  return success()
 }
 
 export async function deleteExpense(id: string): Promise<ActionResult> {

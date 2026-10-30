@@ -44,6 +44,9 @@ export function sourceFromSlug(slug: unknown): ExpenseSource | null {
   return EXPENSE_SOURCE_KEYS.find((key) => EXPENSE_SOURCES[key].slug === slug) ?? null
 }
 
+/** Máximo de gastos que se guardan de una vez en "Varios gastos". */
+export const MAX_BATCH_ITEMS = 100
+
 /** Categorías que se crean automáticamente la primera vez que entras. */
 export const DEFAULT_CATEGORIES = [
   { name: 'Alimentos', icon: '🥩', color: '#f97316', hint: 'Carnes, verduras, abarrotes, lácteos' },
